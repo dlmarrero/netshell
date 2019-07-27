@@ -1,2 +1,5 @@
 netshell
+netshellcode
+.gdb_history
+*.o
 *.swp
